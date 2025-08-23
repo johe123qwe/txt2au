@@ -71,7 +71,7 @@ class Text2audio(QMainWindow):
             vbox.addLayout(hbox)
 
             self.setGeometry(650, 300, 450, 350)
-            self.setWindowTitle('文字转音频1.2')
+            self.setWindowTitle('文字转音频1.2.1')
             logging.info("UI components successfully set up")
 
         except Exception as e:
@@ -150,4 +150,4 @@ if __name__ == '__main__':
         ex.show()
         sys.exit(app.exec())
     except Exception as e:
-        logging.critical("Critical error in application execution", exc_info=True)
+        logging.critical(f"Critical error in application execution, {str(e)}", exc_info=True)

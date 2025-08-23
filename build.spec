@@ -82,6 +82,7 @@ elif platform.system() == "Windows":
         codesign_identity=None,
         entitlements_file=None,
         icon=['src\logo.ico'],
+        contents_directory='.',
     )
     coll = COLLECT(
         exe,
