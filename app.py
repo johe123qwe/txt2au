@@ -71,7 +71,7 @@ class Text2audio(QMainWindow):
             vbox.addLayout(hbox)
 
             self.setGeometry(650, 300, 450, 350)
-            self.setWindowTitle('文字转音频1.2.1')
+            self.setWindowTitle('文字转音频1.2.2')
             logging.info("UI components successfully set up")
 
         except Exception as e:
