@@ -15,7 +15,7 @@ python app.py
 ## Packaged into pyqt software
 
 ```
-python build.spec
+pyinstaller build.spec
 ```
 
 ## Thanks

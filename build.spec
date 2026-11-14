@@ -81,7 +81,7 @@ elif platform.system() == "Windows":
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
-        icon=['src\logo.ico'],
+        icon=['src/logo.ico'],
         contents_directory='.',
     )
     coll = COLLECT(
