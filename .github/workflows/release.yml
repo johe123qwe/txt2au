@@ -1,0 +1,141 @@
+name: Build & Release
+
+# 推送 v* 标签（如 v1.2.2）时打包并发布到 Releases；
+# 也可在 Actions 页面手动运行（只上传构建产物，不发布）。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: '3.12'
+  ARCHIVE_PASSWORD: '123'
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Inno Setup
+        run: |
+          if (-not (Get-Command ISCC -ErrorAction SilentlyContinue) -and
+              -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart('v') }
+          else { $v = (Select-String -Path app.py -Pattern "APP_VERSION\s*=\s*'([^']+)'").Matches[0].Groups[1].Value }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build portable + installer
+        run: ./build_windows.ps1 -Target all -Version "${{ steps.ver.outputs.version }}" -Password "$env:ARCHIVE_PASSWORD"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/release/*.7z
+          if-no-files-found: error
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          brew install create-dmg sevenzip
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then v="${GITHUB_REF_NAME#v}"
+          else v=$(sed -nE "s/^APP_VERSION *= *'([^']+)'.*/\1/p" app.py); fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: PyInstaller
+        run: python -m PyInstaller build.spec --noconfirm --clean
+
+      - name: Create DMG
+        run: |
+          mkdir -p dist/dmg dist/release
+          cp -R "dist/文字转音频.app" dist/dmg/
+          # --skip-jenkins：CI 中没有 Finder 会话，跳过窗口布局美化
+          create-dmg \
+            --volname "文字转音频" \
+            --volicon "./src/app.icns" \
+            --window-size 600 300 \
+            --icon-size 100 \
+            --icon "文字转音频.app" 175 120 \
+            --app-drop-link 425 120 \
+            --skip-jenkins \
+            "dist/txt2au-${{ steps.ver.outputs.version }}-macos-${{ matrix.arch }}.dmg" \
+            "dist/dmg/"
+
+      - name: Encrypt with 7z
+        run: |
+          name="txt2au-${{ steps.ver.outputs.version }}-macos-${{ matrix.arch }}"
+          7zz a -t7z -mx=9 -mhe=on "-p${ARCHIVE_PASSWORD}" "dist/release/${name}.7z" "dist/${name}.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/release/*.7z
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.7z
+          generate_release_notes: true
+          body: |
+            所有压缩包均为 7z 加密，解压密码：`123`
+
+            - `*-windows-portable.7z`：Windows 便携版，解压后运行 `文字转音频.exe`
+            - `*-windows-setup.7z`：Windows 安装版，解压后运行 setup.exe 安装
+            - `*-macos-arm64.7z`：macOS Apple 芯片版（dmg）
+            - `*-macos-x64.7z`：macOS Intel 版（dmg）
