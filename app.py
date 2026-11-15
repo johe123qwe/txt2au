@@ -7,13 +7,13 @@ import logging
 from PyQt5.QtWidgets import (QMainWindow, QPushButton, QHBoxLayout,
                              QVBoxLayout, QApplication, QMessageBox, QWidget,
                              QComboBox, QPlainTextEdit, QLineEdit, QLabel,
-                             QFileDialog)
-from PyQt5.QtCore import QSettings
-from PyQt5.QtGui import QIcon
+                             QFileDialog, QAction)
+from PyQt5.QtCore import QSettings, QUrl
+from PyQt5.QtGui import QIcon, QDesktopServices
 
 import tools
 
-APP_VERSION = '1.2.2'
+APP_VERSION = '1.2.3'
 DEFAULT_VOICE = 'zh-CN-YunjianNeural-男'
 
 # 打包后资源在 sys._MEIPASS 下
@@ -38,6 +38,7 @@ class Text2audio(QMainWindow):
         super().__init__()
         self.settings = QSettings('txt2au', 'txt2au')
         self.worker = None
+        self.update_worker = None
         self.initUI()
 
     def initUI(self):
@@ -102,6 +103,18 @@ class Text2audio(QMainWindow):
         self.setGeometry(650, 300, 520, 400)
         self.setWindowTitle('文字转音频' + APP_VERSION)
         self.statusBar().showMessage("就绪")
+
+        # 菜单：帮助
+        helpMenu = self.menuBar().addMenu("帮助")
+        self.updateAction = QAction("检查更新…", self)
+        self.updateAction.setMenuRole(QAction.NoRole)  # macOS 下保留在“帮助”菜单中
+        self.updateAction.triggered.connect(self.check_update)
+        helpMenu.addAction(self.updateAction)
+        aboutAction = QAction("关于", self)
+        aboutAction.setMenuRole(QAction.NoRole)
+        aboutAction.triggered.connect(lambda: QMessageBox.about(
+            self, "关于", "文字转音频\n当前版本：{}".format(APP_VERSION)))
+        helpMenu.addAction(aboutAction)
 
     def choose_dir(self):
         d = QFileDialog.getExistingDirectory(self, "选择保存目录", self.dirEdit.text())
@@ -169,6 +182,44 @@ class Text2audio(QMainWindow):
         logging.error("Generation failed: %s", err)
         self.statusBar().showMessage("生成失败")
         QMessageBox.critical(self, "生成失败", err)
+
+    def check_update(self):
+        if self.update_worker is not None and self.update_worker.isRunning():
+            return
+        self.updateAction.setEnabled(False)
+        self.statusBar().showMessage("正在检查更新…")
+        self.update_worker = tools.UpdateCheckThread(self)
+        self.update_worker.succeeded.connect(self.on_update_checked)
+        self.update_worker.failed.connect(self.on_update_failed)
+        self.update_worker.finished.connect(lambda: self.updateAction.setEnabled(True))
+        self.update_worker.start()
+
+    def on_update_checked(self, release):
+        self.statusBar().showMessage("就绪")
+        if not release or not release['version']:
+            QMessageBox.information(self, "检查更新",
+                                    "当前版本：{}\n暂未查询到发布版本。".format(APP_VERSION))
+            return
+        latest = release['version']
+        logging.info("Update check: current=%s latest=%s", APP_VERSION, latest)
+        if not tools.is_newer(latest, APP_VERSION):
+            QMessageBox.information(self, "检查更新",
+                                    "当前已是最新版本（{}）。".format(APP_VERSION))
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Information)
+        box.setWindowTitle("发现新版本")
+        box.setText("发现新版本 {}（当前版本 {}），是否前往下载？".format(latest, APP_VERSION))
+        if release['notes']:
+            box.setDetailedText(release['notes'])
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        if box.exec() == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl(release['url']))
+
+    def on_update_failed(self, err):
+        logging.warning("Update check failed: %s", err)
+        self.statusBar().showMessage("检查更新失败")
+        QMessageBox.warning(self, "检查更新", "检查更新失败，请检查网络后重试。\n{}".format(err))
 
     def closeEvent(self, event):
         if self.worker is not None and self.worker.isRunning():
